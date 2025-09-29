@@ -1,4 +1,3 @@
-// lib/screens/register_screen.dart
 import 'dart:convert';
 import 'dart:ui';
 import 'package:flutter/material.dart';
@@ -84,7 +83,6 @@ class _RegisterScreenState extends State<RegisterScreen> with SingleTickerProvid
       );
 
       if (res.statusCode == 201) {
-        // auto-login
         final loginRes = await api.login(_loginController.text.trim(), _passwordController.text);
         if (loginRes.statusCode == 200) {
           final session = jsonDecode(loginRes.body);

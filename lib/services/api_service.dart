@@ -1,3 +1,4 @@
+// lib/services/api_service.dart
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
@@ -13,24 +14,30 @@ class ApiService {
   Map<String, String> _jsonHeaders({String? token}) {
     final h = <String, String>{'Content-Type': 'application/json'};
     if (token != null && token.isNotEmpty) {
-      h['x-session-token'] = token; // Papacapim usa esse header
+      h['x-session-token'] = token; // header que a API espera
     }
     return h;
   }
 
   // ----------------- Persistência -----------------
-  Future<void> persistSession({String? token, int? sessionId, String? userLogin}) async {
+  Future<void> persistSession({
+    String? token,
+    int? sessionId,
+    String? userLogin,
+  }) async {
     final prefs = await SharedPreferences.getInstance();
     if (token != null) {
       await prefs.setString(_kToken, token);
     } else {
       await prefs.remove(_kToken);
     }
+
     if (sessionId != null) {
       await prefs.setInt(_kSessionId, sessionId);
     } else {
       await prefs.remove(_kSessionId);
     }
+
     if (userLogin != null) {
       await prefs.setString(_kUserLogin, userLogin);
     } else {
@@ -45,12 +52,20 @@ class ApiService {
     await prefs.remove(_kUserLogin);
   }
 
-  Future<String?> getToken() async =>
-      (await SharedPreferences.getInstance()).getString(_kToken);
-  Future<int?> getSessionId() async =>
-      (await SharedPreferences.getInstance()).getInt(_kSessionId);
-  Future<String?> getStoredUserLogin() async =>
-      (await SharedPreferences.getInstance()).getString(_kUserLogin);
+  Future<String?> getToken() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getString(_kToken);
+  }
+
+  Future<int?> getSessionId() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getInt(_kSessionId);
+  }
+
+  Future<String?> getStoredUserLogin() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getString(_kUserLogin);
+  }
 
   // ----------------- AUTENTICAÇÃO -----------------
   Future<http.Response> login(String login, String password) {
@@ -131,24 +146,12 @@ class ApiService {
     return http.get(url, headers: _jsonHeaders(token: t));
   }
 
-  Future<http.Response> follow(String login) async {
-    final t = await getToken();
-    final url = Uri.parse('$baseUrl/users/$login/followers');
-    return http.post(url, headers: _jsonHeaders(token: t));
-  }
-
-  Future<http.Response> listFollowers(String login) async {
-    final t = await getToken();
-    final url = Uri.parse('$baseUrl/users/$login/followers');
-    return http.get(url, headers: _jsonHeaders(token: t));
-  }
-
   // ----------------- POSTS -----------------
   Future<http.Response> getFeed({int? page, int? feed, String? search}) async {
     final t = await getToken();
     final qp = <String, String>{};
     if (page != null) qp['page'] = '$page';
-    if (feed != null) qp['feed'] = '$feed';
+    if (feed != null) qp['feed'] = '$feed'; // 1 = apenas quem eu sigo
     if (search != null && search.isNotEmpty) qp['search'] = search;
     final url = Uri.parse('$baseUrl/posts')
         .replace(queryParameters: qp.isEmpty ? null : qp);
@@ -184,10 +187,9 @@ class ApiService {
     return http.post(url, headers: _jsonHeaders(token: t), body: body);
   }
 
-  // <<< NOVO: obter replies >>>
-  Future<http.Response> getReplies(int postId) async {
+  Future<http.Response> getReplies(int parentPostId) async {
     final t = await getToken();
-    final url = Uri.parse('$baseUrl/posts/$postId/replies');
+    final url = Uri.parse('$baseUrl/posts/$parentPostId/replies');
     return http.get(url, headers: _jsonHeaders(token: t));
   }
 
@@ -195,7 +197,7 @@ class ApiService {
   Future<http.Response> likePost(int id) async {
     final t = await getToken();
     final url = Uri.parse('$baseUrl/posts/$id/likes');
-    return http.post(url, headers: _jsonHeaders(token: t));
+    return http.post(url, headers: _jsonHeaders(token: t), body: jsonEncode({}));
   }
 
   Future<http.Response> listLikes(int id) async {
@@ -207,6 +209,29 @@ class ApiService {
   Future<http.Response> unlikePost(int postId, int likeId) async {
     final t = await getToken();
     final url = Uri.parse('$baseUrl/posts/$postId/likes/$likeId');
+    return http.delete(url, headers: _jsonHeaders(token: t));
+  }
+
+  // ----------------- FOLLOWERS -----------------
+  /// Lista seguidores de um usuário (quem segue ESSE usuário).
+  Future<http.Response> listFollowers(String login) async {
+    final t = await getToken();
+    final url = Uri.parse('$baseUrl/users/$login/followers');
+    return http.get(url, headers: _jsonHeaders(token: t));
+  }
+
+  /// Segue o usuário.
+  Future<http.Response> follow(String loginToFollow) async {
+    final t = await getToken();
+    final url = Uri.parse('$baseUrl/users/$loginToFollow/followers');
+    return http.post(url, headers: _jsonHeaders(token: t), body: jsonEncode({}));
+  }
+
+  /// Deixa de seguir (precisa do id do follower).
+  Future<http.Response> unfollow(String loginToUnfollow, int followerId) async {
+    final t = await getToken();
+    final url =
+        Uri.parse('$baseUrl/users/$loginToUnfollow/followers/$followerId');
     return http.delete(url, headers: _jsonHeaders(token: t));
   }
 }

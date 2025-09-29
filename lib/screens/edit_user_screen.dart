@@ -1,370 +1,239 @@
-import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+
 import '../provider/user_provider.dart';
-import '../models/user.dart';
 
 class EditUserScreen extends StatefulWidget {
-  const EditUserScreen({super.key});
+  const EditUserScreen({Key? key}) : super(key: key);
 
   @override
   State<EditUserScreen> createState() => _EditUserScreenState();
 }
 
-class _EditUserScreenState extends State<EditUserScreen>
-    with SingleTickerProviderStateMixin {
+class _EditUserScreenState extends State<EditUserScreen> {
   final _formKey = GlobalKey<FormState>();
+
   final _loginCtrl = TextEditingController();
   final _nameCtrl = TextEditingController();
-  final _passwordCtrl = TextEditingController();
-  final _confirmCtrl = TextEditingController();
+  final _passCtrl = TextEditingController();
+  final _pass2Ctrl = TextEditingController();
 
-  bool _obscure1 = true;
-  bool _obscure2 = true;
-  bool _saving = false;
-
-  late final AnimationController _animCtrl;
-  late final Animation<double> _fadeIn;
+  bool _isSaving = false;
+  bool _isDeleting = false;
+  bool _showPass = false;
+  bool _showPass2 = false;
 
   @override
   void initState() {
     super.initState();
-    _animCtrl =
-        AnimationController(vsync: this, duration: const Duration(milliseconds: 500))
-          ..forward();
-    _fadeIn = CurvedAnimation(parent: _animCtrl, curve: Curves.easeOutCubic);
-
     final up = context.read<UserProvider>();
-    final User? u = up.user;
-    _loginCtrl.text = u?.login.isNotEmpty == true ? u!.login : (up.userLogin ?? '');
-    _nameCtrl.text = (u?.name ?? '').isNotEmpty ? u!.name : '';
+    _loginCtrl.text = up.user?.login ?? up.userLogin ?? '';
+    _nameCtrl.text = up.user?.name ?? '';
   }
 
   @override
   void dispose() {
-    _animCtrl.dispose();
     _loginCtrl.dispose();
     _nameCtrl.dispose();
-    _passwordCtrl.dispose();
-    _confirmCtrl.dispose();
+    _passCtrl.dispose();
+    _pass2Ctrl.dispose();
     super.dispose();
-  }
-
-  void _snack(String msg) {
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
   }
 
   Future<void> _save() async {
     if (!_formKey.currentState!.validate()) return;
-    setState(() => _saving = true);
 
+    setState(() => _isSaving = true);
+
+    final userProv = context.read<UserProvider>();
     final newLogin = _loginCtrl.text.trim();
     final newName = _nameCtrl.text.trim();
-    final newPass = _passwordCtrl.text;
-    final newPassConf = _confirmCtrl.text;
+    final newPass = _passCtrl.text.trim();
+    final newPass2 = _pass2Ctrl.text.trim();
 
-    try {
-      final ok = await context.read<UserProvider>().updateProfile(
-            name: newName.isNotEmpty ? newName : null, // <- usa name
-            password: newPass.isNotEmpty ? newPass : null,
-            passwordConfirmation: newPassConf.isNotEmpty ? newPassConf : null,
-            newLogin: newLogin.isNotEmpty ? newLogin : null, // <- usa newLogin
-          );
+    final ok = await userProv.updateProfile(
+      name: newName.isNotEmpty ? newName : null,
+      newLogin: newLogin.isNotEmpty ? newLogin : null,
+      password: newPass.isNotEmpty ? newPass : null,
+      passwordConfirmation: newPass2.isNotEmpty ? newPass2 : null,
+    );
 
-      if (!mounted) return;
-      if (ok) {
-        _snack('Dados atualizados com sucesso.');
-        Navigator.pop(context);
-      } else {
-        _snack('Não foi possível atualizar os dados.');
-      }
-    } catch (e) {
-      _snack('Erro ao salvar: $e');
-    } finally {
-      if (mounted) setState(() => _saving = false);
+    setState(() => _isSaving = false);
+
+    if (!mounted) return;
+
+    if (ok) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Perfil atualizado com sucesso!')),
+      );
+      Navigator.pop(context);
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Falha ao atualizar perfil.')),
+      );
     }
   }
 
   Future<void> _deleteAccount() async {
-    final confirm = await showDialog<bool>(
+    final sure = await showDialog<bool>(
       context: context,
       builder: (_) => AlertDialog(
         title: const Text('Excluir conta'),
-        content: const Text('Tem certeza? Esta ação não pode ser desfeita.'),
+        content: const Text(
+          'Tem certeza que deseja excluir sua conta? Esta ação não pode ser desfeita.',
+        ),
         actions: [
           TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancelar')),
           FilledButton.tonal(onPressed: () => Navigator.pop(context, true), child: const Text('Excluir')),
         ],
       ),
     );
+    if (sure != true) return;
 
-    if (confirm != true) return;
-
-    setState(() => _saving = true);
+    setState(() => _isDeleting = true);
     final ok = await context.read<UserProvider>().deleteAccount();
+    setState(() => _isDeleting = false);
+
     if (!mounted) return;
-    setState(() => _saving = false);
 
     if (ok) {
-      _snack('Conta excluída.');
-      Navigator.pushNamedAndRemoveUntil(context, '/login', (_) => false);
+      // Sai para a tela de login
+      Navigator.of(context).pushNamedAndRemoveUntil('/login', (route) => false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Conta excluída com sucesso.')),
+      );
     } else {
-      _snack('Não foi possível excluir a conta.');
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Não foi possível excluir a conta.')),
+      );
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
+    final up = context.watch<UserProvider>();
 
     return Scaffold(
-      body: Stack(
+      appBar: AppBar(title: const Text('Editar perfil')),
+      body: ListView(
+        padding: const EdgeInsets.fromLTRB(16, 20, 16, 24),
         children: [
-          // fundo
-          Container(
-            decoration: const BoxDecoration(
-              gradient: LinearGradient(
-                colors: [Color(0xFF0F172A), Color(0xFF111827), Color(0xFF1F2937)],
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-              ),
-            ),
-          ),
-          Positioned(top: -80, right: -40, child: _Bubble(color: Colors.blueAccent.withOpacity(0.25), size: 180)),
-          Positioned(bottom: -60, left: -30, child: _Bubble(color: Colors.purpleAccent.withOpacity(0.20), size: 160)),
+          Form(
+            key: _formKey,
+            child: Column(
+              children: [
+                // LOGIN
+                TextFormField(
+                  controller: _loginCtrl,
+                  decoration: const InputDecoration(
+                    labelText: 'Login (@usuario)',
+                    border: OutlineInputBorder(),
+                    prefixText: '@',
+                  ),
+                  textInputAction: TextInputAction.next,
+                  validator: (v) {
+                    final s = (v ?? '').trim();
+                    if (s.isEmpty) return 'Informe um login';
+                    if (s.contains(' ')) return 'Não use espaços no login';
+                    return null;
+                  },
+                ),
+                const SizedBox(height: 12),
 
-          // conteúdo
-          Center(
-            child: FadeTransition(
-              opacity: _fadeIn,
-              child: Padding(
-                padding: const EdgeInsets.all(24),
-                child: ConstrainedBox(
-                  constraints: const BoxConstraints(maxWidth: 460),
-                  child: _GlassCard(
-                    child: Form(
-                      key: _formKey,
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Row(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              const Icon(Icons.manage_accounts_rounded, color: Colors.white, size: 36),
-                              const SizedBox(width: 12),
-                              Text(
-                                'Editar perfil',
-                                style: theme.textTheme.headlineSmall?.copyWith(
-                                  fontWeight: FontWeight.w700,
-                                  color: Colors.white,
-                                ),
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 20),
+                // NAME
+                TextFormField(
+                  controller: _nameCtrl,
+                  decoration: const InputDecoration(
+                    labelText: 'Nome',
+                    border: OutlineInputBorder(),
+                  ),
+                  textInputAction: TextInputAction.next,
+                  validator: (v) {
+                    final s = (v ?? '').trim();
+                    if (s.isEmpty) return 'Informe seu nome';
+                    return null;
+                  },
+                ),
+                const SizedBox(height: 12),
 
-                          // login
-                          _ModernField(
-                            controller: _loginCtrl,
-                            label: 'Login',
-                            icon: Icons.alternate_email_rounded,
-                            validator: (v) => (v == null || v.trim().isEmpty) ? 'Informe um login' : null,
-                          ),
-                          const SizedBox(height: 14),
-
-                          // nome
-                          _ModernField(
-                            controller: _nameCtrl,
-                            label: 'Nome',
-                            icon: Icons.badge_outlined,
-                            validator: (v) => (v == null || v.trim().isEmpty) ? 'Informe seu nome' : null,
-                          ),
-                          const SizedBox(height: 14),
-
-                          // senha (opcional)
-                          _ModernField(
-                            controller: _passwordCtrl,
-                            label: 'Nova senha (opcional)',
-                            icon: Icons.lock_outline,
-                            obscure: _obscure1,
-                            suffix: IconButton(
-                              onPressed: () => setState(() => _obscure1 = !_obscure1),
-                              icon: Icon(_obscure1 ? Icons.visibility_off : Icons.visibility),
-                              color: Colors.white70,
-                            ),
-                          ),
-                          const SizedBox(height: 14),
-
-                          // confirmar senha (opcional)
-                          _ModernField(
-                            controller: _confirmCtrl,
-                            label: 'Confirmar nova senha',
-                            icon: Icons.lock_person_outlined,
-                            obscure: _obscure2,
-                            suffix: IconButton(
-                              onPressed: () => setState(() => _obscure2 = !_obscure2),
-                              icon: Icon(_obscure2 ? Icons.visibility_off : Icons.visibility),
-                              color: Colors.white70,
-                            ),
-                            validator: (v) {
-                              if (_passwordCtrl.text.isEmpty && (v ?? '').isEmpty) return null;
-                              if (v != _passwordCtrl.text) return 'Senhas não coincidem';
-                              return null;
-                            },
-                          ),
-                          const SizedBox(height: 22),
-
-                          // salvar
-                          SizedBox(
-                            width: double.infinity,
-                            height: 48,
-                            child: ElevatedButton(
-                              onPressed: _saving ? null : _save,
-                              style: ElevatedButton.styleFrom(
-                                backgroundColor: const Color(0xFF10B981),
-                                foregroundColor: Colors.white,
-                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-                                elevation: 0,
-                              ),
-                              child: _saving
-                                  ? const SizedBox(width: 22, height: 22, child: CircularProgressIndicator(strokeWidth: 2))
-                                  : const Text('Salvar alterações', style: TextStyle(fontWeight: FontWeight.w600)),
-                            ),
-                          ),
-                          const SizedBox(height: 12),
-
-                          // excluir
-                          SizedBox(
-                            width: double.infinity,
-                            height: 44,
-                            child: OutlinedButton(
-                              onPressed: _saving ? null : _deleteAccount,
-                              style: OutlinedButton.styleFrom(
-                                foregroundColor: Colors.redAccent,
-                                side: const BorderSide(color: Colors.redAccent),
-                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                              ),
-                              child: const Text('Excluir conta'),
-                            ),
-                          ),
-
-                          const SizedBox(height: 8),
-                          TextButton(
-                            onPressed: _saving ? null : () => Navigator.pop(context),
-                            child: const Text('Voltar'),
-                          ),
-                        ],
-                      ),
+                // PASSWORD
+                TextFormField(
+                  controller: _passCtrl,
+                  obscureText: !_showPass,
+                  decoration: InputDecoration(
+                    labelText: 'Nova senha (opcional)',
+                    border: const OutlineInputBorder(),
+                    suffixIcon: IconButton(
+                      onPressed: () => setState(() => _showPass = !_showPass),
+                      icon: Icon(_showPass ? Icons.visibility_off : Icons.visibility),
                     ),
                   ),
                 ),
-              ),
+                const SizedBox(height: 12),
+
+                // PASSWORD CONFIRMATION
+                TextFormField(
+                  controller: _pass2Ctrl,
+                  obscureText: !_showPass2,
+                  decoration: InputDecoration(
+                    labelText: 'Confirmar nova senha',
+                    border: const OutlineInputBorder(),
+                    suffixIcon: IconButton(
+                      onPressed: () => setState(() => _showPass2 = !_showPass2),
+                      icon: Icon(_showPass2 ? Icons.visibility_off : Icons.visibility),
+                    ),
+                  ),
+                  validator: (v) {
+                    final p1 = _passCtrl.text.trim();
+                    final p2 = (v ?? '').trim();
+                    if (p1.isEmpty && p2.isEmpty) return null; // sem troca de senha
+                    if (p1 != p2) return 'As senhas não coincidem';
+                    if (p1.length < 4) return 'Use ao menos 4 caracteres';
+                    return null;
+                  },
+                ),
+                const SizedBox(height: 20),
+
+                // SALVAR
+                SizedBox(
+                  width: double.infinity,
+                  child: FilledButton(
+                    onPressed: _isSaving ? null : _save,
+                    child: _isSaving
+                        ? const SizedBox(
+                            height: 20, width: 20, child: CircularProgressIndicator(strokeWidth: 2))
+                        : const Text('Salvar alterações'),
+                  ),
+                ),
+                const SizedBox(height: 12),
+
+                // EXCLUIR CONTA
+                SizedBox(
+                  width: double.infinity,
+                  child: FilledButton.tonal(
+                    style: FilledButton.styleFrom(
+                      backgroundColor: Theme.of(context).colorScheme.errorContainer,
+                      foregroundColor: Theme.of(context).colorScheme.onErrorContainer,
+                    ),
+                    onPressed: _isDeleting ? null : _deleteAccount,
+                    child: _isDeleting
+                        ? const SizedBox(
+                            height: 20, width: 20, child: CircularProgressIndicator(strokeWidth: 2))
+                        : const Text('Excluir conta'),
+                  ),
+                ),
+
+                const SizedBox(height: 8),
+                if (up.userLogin != null)
+                  Text(
+                    'Logado como @${up.userLogin}',
+                    style: Theme.of(context).textTheme.bodySmall,
+                  ),
+              ],
             ),
           ),
         ],
       ),
-    );
-  }
-}
-
-// ===== Helpers visuais (iguais aos usados nas outras telas) =====
-
-class _GlassCard extends StatelessWidget {
-  final Widget child;
-  const _GlassCard({required this.child});
-
-  @override
-  Widget build(BuildContext context) {
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(24),
-      child: BackdropFilter(
-        filter: ImageFilter.blur(sigmaX: 16, sigmaY: 16),
-        child: Container(
-          padding: const EdgeInsets.fromLTRB(24, 28, 24, 24),
-          decoration: BoxDecoration(
-            color: Colors.white.withOpacity(0.06),
-            borderRadius: BorderRadius.circular(24),
-            border: Border.all(color: Colors.white.withOpacity(0.12)),
-            boxShadow: const [
-              BoxShadow(
-                color: Colors.black54,
-                blurRadius: 40,
-                spreadRadius: -8,
-                offset: Offset(0, 18),
-              ),
-            ],
-          ),
-          child: child,
-        ),
-      ),
-    );
-  }
-}
-
-class _ModernField extends StatelessWidget {
-  final TextEditingController controller;
-  final String label;
-  final IconData icon;
-  final bool obscure;
-  final Widget? suffix;
-  final String? Function(String?)? validator;
-
-  const _ModernField({
-    required this.controller,
-    required this.label,
-    required this.icon,
-    this.obscure = false,
-    this.suffix,
-    this.validator,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return TextFormField(
-      controller: controller,
-      obscureText: obscure,
-      validator: validator,
-      style: const TextStyle(color: Colors.white),
-      decoration: InputDecoration(
-        prefixIcon: Icon(icon, color: Colors.white70),
-        suffixIcon: suffix,
-        labelText: label,
-        labelStyle: const TextStyle(color: Colors.white70),
-        filled: true,
-        fillColor: Colors.white.withOpacity(0.08),
-        focusedBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(14),
-          borderSide: const BorderSide(color: Color(0xFF60A5FA), width: 1.4),
-        ),
-        enabledBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(14),
-          borderSide: const BorderSide(color: Colors.white24),
-        ),
-        errorBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(14),
-          borderSide: const BorderSide(color: Colors.redAccent),
-        ),
-        focusedErrorBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(14),
-          borderSide: const BorderSide(color: Colors.redAccent, width: 1.4),
-        ),
-        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
-      ),
-    );
-  }
-}
-
-class _Bubble extends StatelessWidget {
-  final Color color;
-  final double size;
-  const _Bubble({required this.color, required this.size});
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: size,
-      height: size,
-      decoration: BoxDecoration(shape: BoxShape.circle, color: color),
     );
   }
 }

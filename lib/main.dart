@@ -7,7 +7,7 @@ import 'provider/post_provider.dart';
 import 'screens/login_screen.dart';
 import 'screens/register_screen.dart';
 import 'screens/home_shell.dart';
-import 'screens/edit_user_screen.dart';
+import 'screens/edit_user_screen.dart' as edit;
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -25,9 +25,7 @@ class PapacapimApp extends StatelessWidget {
         brightness: Brightness.dark,
       ),
       useMaterial3: true,
-      snackBarTheme: const SnackBarThemeData(
-        behavior: SnackBarBehavior.floating,
-      ),
+      snackBarTheme: const SnackBarThemeData(behavior: SnackBarBehavior.floating),
     );
 
     return MultiProvider(
@@ -38,20 +36,20 @@ class PapacapimApp extends StatelessWidget {
       child: Consumer<UserProvider>(
         builder: (_, user, __) {
           final isLogged = user.isLoggedIn;
+
           return MaterialApp(
             debugShowCheckedModeBanner: false,
             title: 'Papacapim',
             theme: theme,
-            // tela inicial
             home: isLogged ? const HomeShell() : const LoginScreen(),
             routes: {
               '/login': (_) => const LoginScreen(),
               '/register': (_) => const RegisterScreen(),
-              '/home': (_) => const HomeShell(initialIndex: 0),
-              '/feed': (_) => const HomeShell(initialIndex: 0), // compat
-              '/explore': (_) => const HomeShell(initialIndex: 1),
-              '/profile': (_) => const HomeShell(initialIndex: 2),
-              '/edit-profile': (_) => const EditUserScreen(),
+              '/home': (_) => const HomeShell(),
+              '/feed': (_) => const HomeShell(),     // compatibilidade
+              '/explore': (_) => const HomeShell(),  // compatibilidade
+              '/profile': (_) => const HomeShell(),  // compatibilidade
+              '/edit-profile': (_) => edit.EditUserScreen(), // <<< AQUI
             },
           );
         },

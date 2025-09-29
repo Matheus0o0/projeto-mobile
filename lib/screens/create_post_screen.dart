@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../provider/post_provider.dart';
-// Make sure the PostProvider class is defined and exported in post_provider.dart
 
 class CreatePostScreen extends StatefulWidget {
   const CreatePostScreen({super.key});

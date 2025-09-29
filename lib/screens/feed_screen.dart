@@ -8,7 +8,6 @@ class FeedScreen extends StatefulWidget {
   final bool compactAppBar;
   const FeedScreen({super.key, this.compactAppBar = false});
 
-  // opcional: usado pelo HomeShell pra rolar pro topo
   static final _scrollCtrl = ScrollController();
   static void scrollToTop() {
     if (_scrollCtrl.hasClients) {
@@ -27,7 +26,7 @@ class _FeedScreenState extends State<FeedScreen> {
   @override
   void initState() {
     super.initState();
-    // carregamento inicial (se necessário)
+
     WidgetsBinding.instance.addPostFrameCallback((_) {
       final p = context.read<PostProvider>();
       if (p.posts.isEmpty) {
@@ -35,7 +34,6 @@ class _FeedScreenState extends State<FeedScreen> {
       }
     });
 
-    // scroll infinito
     FeedScreen._scrollCtrl.addListener(() {
       final p = context.read<PostProvider>();
       if (FeedScreen._scrollCtrl.position.pixels >=

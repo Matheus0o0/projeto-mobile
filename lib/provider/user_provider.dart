@@ -1,5 +1,8 @@
+// lib/provider/user_provider.dart
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+
 import '../models/user.dart';
 import '../services/api_service.dart';
 
@@ -11,44 +14,83 @@ class UserProvider with ChangeNotifier {
   String? _userLogin;
   User? _user;
 
-  List<String> _followers = <String>[];
-  List<String> _followings = <String>[]; // API não fornece followings
+  /// Conjunto local de quem EU sigo (persistido por usuário logado).
+  final Set<String> _followingLocal = <String>{};
 
+  // =================== GETTERS ===================
   String? get token => _token;
   int? get sessionId => _sessionId;
   String? get userLogin => _userLogin;
   User? get user => _user;
 
-  List<String> get followers => _followers;
-  List<String> get followings => _followings;
-
   bool get isLoggedIn => _token != null && (_userLogin ?? '').isNotEmpty;
 
-  // ---------- Sessão ----------
-  void setSession({required String token, int? sessionId, required String userLogin}) {
+  List<String> get following =>
+      _followingLocal.toList()..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
+  bool isFollowing(String login) => _followingLocal.contains(login);
+
+  // =================== PERSISTÊNCIA FOLLOWING (LOCAL) ===================
+  String _followingKey(String login) => 'following_local_$login';
+
+  Future<void> _loadFollowingLocal() async {
+    final me = _userLogin;
+    if (me == null || me.isEmpty) return;
+    final prefs = await SharedPreferences.getInstance();
+    final list = prefs.getStringList(_followingKey(me)) ?? <String>[];
+    _followingLocal
+      ..clear()
+      ..addAll(list);
+  }
+
+  Future<void> _saveFollowingLocal() async {
+    final me = _userLogin;
+    if (me == null || me.isEmpty) return;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setStringList(_followingKey(me), _followingLocal.toList());
+  }
+
+  Future<void> _clearFollowingLocal() async {
+    final me = _userLogin;
+    if (me == null || me.isEmpty) return;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove(_followingKey(me));
+    _followingLocal.clear();
+  }
+
+  // =================== SESSÃO ===================
+  void setSession({
+    required String token,
+    int? sessionId,
+    required String userLogin,
+  }) async {
     _token = token;
     _sessionId = sessionId;
     _userLogin = userLogin;
+    await _loadFollowingLocal();
     notifyListeners();
   }
 
-  void setUser(User u) {
+  void setUser(User u) async {
     _user = u;
-    if (u.login.isNotEmpty) _userLogin = u.login;
+    if (u.login.isNotEmpty) {
+      final changed = (_userLogin ?? '') != u.login;
+      _userLogin = u.login;
+      if (changed) await _loadFollowingLocal();
+    }
     notifyListeners();
   }
 
   Future<void> clearSession() async {
+    await _clearFollowingLocal();
     _token = null;
     _sessionId = null;
     _userLogin = null;
     _user = null;
-    _followers = <String>[];
-    _followings = <String>[];
     await _api.clearSession();
     notifyListeners();
   }
 
+  /// Restaura sessão salva e baixa o usuário.
   Future<void> restoreSession() async {
     final t = await _api.getToken();
     final sid = await _api.getSessionId();
@@ -69,63 +111,98 @@ class UserProvider with ChangeNotifier {
         final map = jsonDecode(r.body) as Map<String, dynamic>;
         _user = User.fromJson(map);
       }
-    } catch (_) {}
+    } catch (_) {
+      // mantém sessão parcial
+    }
+
+    await _loadFollowingLocal();
     notifyListeners();
   }
 
-  // ---------- Seguidores ----------
-  Future<void> loadFollowers(String viewLogin) async {
-    try {
-      final r = await _api.listFollowers(viewLogin);
-      if (r.statusCode == 200) {
-        final List list = jsonDecode(r.body) as List;
-        _followers = list
-            .map((e) => (e as Map<String, dynamic>)['login'] as String? ?? '')
-            .where((s) => s.isNotEmpty)
-            .toList();
-      } else {
-        _followers = <String>[];
+  // =================== FOLLOW / UNFOLLOW ===================
+  Future<bool> followToggle(String login) async {
+    if ((_userLogin ?? '').isEmpty || (_token ?? '').isEmpty) return false;
+
+    final already = isFollowing(login);
+
+    if (!already) {
+      // seguir (otimista)
+      _followingLocal.add(login);
+      notifyListeners();
+      await _saveFollowingLocal();
+
+      try {
+        final res = await _api.follow(login);
+        if (res.statusCode == 201 || res.statusCode == 422) {
+          // 422 = já seguia no servidor
+          return true;
+        }
+        // falhou: reverte
+        _followingLocal.remove(login);
+        notifyListeners();
+        await _saveFollowingLocal();
+        return false;
+      } catch (_) {
+        _followingLocal.remove(login);
+        notifyListeners();
+        await _saveFollowingLocal();
+        return false;
       }
-      _followings = <String>[]; // API não expõe followings
-    } catch (_) {
-      _followers = <String>[];
-      _followings = <String>[];
+    } else {
+      // deixar de seguir (otimista)
+      _followingLocal.remove(login);
+      notifyListeners();
+      await _saveFollowingLocal();
+
+      try {
+        final r = await _api.listFollowers(login);
+        if (r.statusCode == 200) {
+          final list = (jsonDecode(r.body) as List).cast<Map<String, dynamic>>();
+          Map<String, dynamic>? meRow;
+          for (final row in list) {
+            if ((row['login'] ?? '') == _userLogin) {
+              meRow = row;
+              break;
+            }
+          }
+          final followerId = (meRow?['id'] as num?)?.toInt();
+          if (followerId != null) {
+            final del = await _api.unfollow(login, followerId);
+            if (del.statusCode == 204) return true;
+          }
+        }
+        // mesmo sem deletar no servidor, mantemos localmente
+        return true;
+      } catch (_) {
+        return true;
+      }
     }
-    notifyListeners();
   }
 
-  Future<bool> followUser(String loginToFollow) async {
-    try {
-      final r = await _api.follow(loginToFollow);
-      final ok = r.statusCode == 201;
-      if (ok) await loadFollowers(loginToFollow);
-      return ok;
-    } catch (_) {
-      return false;
-    }
-  }
+  // =================== ATUALIZAR / EXCLUIR CONTA ===================
 
-  // ---------- Compat: telas chamam `follow(login)` ----------
-  Future<bool> follow(String login) => followUser(login);
-
-  // ---------- Atualização / exclusão ----------
+  /// Atualiza perfil do usuário autenticado.
+  /// Use os campos que quiser; os que forem null serão ignorados.
   Future<bool> updateProfile({
-    String? newLogin,
     String? name,
     String? password,
     String? passwordConfirmation,
+    String? newLogin,
   }) async {
     try {
       final r = await _api.updateUser(
-        login: newLogin,
         name: name,
         password: password,
         passwordConfirmation: passwordConfirmation,
+        login: newLogin,
       );
+
       if (r.statusCode == 200 || r.statusCode == 201) {
         final map = jsonDecode(r.body) as Map<String, dynamic>;
         final updated = User.fromJson(map);
         setUser(updated);
+
+        // se o login mudou, persistimos a sessão com o novo login
         if (newLogin != null && newLogin.isNotEmpty) {
           _userLogin = newLogin;
           await _api.persistSession(
@@ -133,6 +210,7 @@ class UserProvider with ChangeNotifier {
             sessionId: _sessionId,
             userLogin: _userLogin,
           );
+          await _loadFollowingLocal();
         }
         return true;
       }
@@ -142,6 +220,7 @@ class UserProvider with ChangeNotifier {
     }
   }
 
+  /// Exclui a conta do usuário autenticado.
   Future<bool> deleteAccount() async {
     try {
       final r = await _api.deleteUser();
@@ -149,7 +228,9 @@ class UserProvider with ChangeNotifier {
         await clearSession();
         return true;
       }
-    } catch (_) {}
-    return false;
+      return false;
+    } catch (_) {
+      return false;
+    }
   }
 }

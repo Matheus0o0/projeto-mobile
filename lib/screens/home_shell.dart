@@ -1,12 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-
 import '../provider/user_provider.dart';
 import '../provider/post_provider.dart';
-
-// alias para evitar conflito de nomes
 import 'explore_screen.dart' as explore;
-
 import 'feed_screen.dart';
 import 'profile_screen.dart';
 
