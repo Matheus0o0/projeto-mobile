@@ -39,20 +39,55 @@ class _ExploreScreenState extends State<ExploreScreen> {
 
     try {
       if (_mode == SearchMode.users) {
-        final res = await _api.searchUsers(term);
+        final res = await _api.listUsers(search: term);
+        final List<User> found = [];
         if (res.statusCode == 200) {
           final list = (jsonDecode(res.body) as List).cast<Map<String, dynamic>>();
-          _users = list.map((e) => User.fromJson(e)).toList();
-          _posts = [];
-        } else {
-          _users = [];
+          found.addAll(list.map((e) => User.fromJson(e)));
         }
+
+        // Fallback: tentar achar por login exato (GET /users/{login}) quando aplicável
+        final loginProbe = term.startsWith('@') ? term.substring(1) : term;
+        if (loginProbe.isNotEmpty && !loginProbe.contains(' ')) {
+          try {
+            final r2 = await _api.getUserByLogin(loginProbe);
+            if (r2.statusCode == 200) {
+              final map = jsonDecode(r2.body) as Map<String, dynamic>;
+              final u = User.fromJson(map);
+              final exists = found.any((x) => x.login == u.login);
+              if (!exists) found.add(u);
+            }
+          } catch (_) {}
+        }
+
+        // ordenar alfabeticamente por nome, depois login
+        found.sort((a, b) {
+          final an = (a.name).toLowerCase();
+          final bn = (b.name).toLowerCase();
+          final byName = an.compareTo(bn);
+          if (byName != 0) return byName;
+          return a.login.toLowerCase().compareTo(b.login.toLowerCase());
+        });
+
+        _users = found;
+        _posts = [];
       } else {
         // Posts via feed com ?search=term
-        final res = await _api.getFeed(page: 1, search: term);
+        final res = await _api.getPosts(page: 1, search: term);
         if (res.statusCode == 200) {
           final list = (jsonDecode(res.body) as List).cast<Map<String, dynamic>>();
-          _posts = list.map((e) => Post.fromJson(e)).toList();
+          final parsed = list.map((e) => Post.fromJson(e)).toList();
+          // mostrar apenas posts raiz e ordenar por created_at desc
+          final roots = parsed.where((p) => p.postId == null).toList();
+          roots.sort((a, b) {
+            final ca = a.createdAt ?? '';
+            final cb = b.createdAt ?? '';
+            if (ca.isEmpty && cb.isEmpty) return 0;
+            if (ca.isEmpty) return 1;
+            if (cb.isEmpty) return -1;
+            return cb.compareTo(ca);
+          });
+          _posts = roots;
           _users = [];
         } else {
           _posts = [];

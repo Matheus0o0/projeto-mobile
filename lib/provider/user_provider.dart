@@ -42,6 +42,12 @@ class UserProvider with ChangeNotifier {
       ..addAll(list);
   }
 
+  /// Expõe recarga da lista de "quem eu sigo" a partir do storage local
+  Future<void> reloadFollowingFromLocal() async {
+    await _loadFollowingLocal();
+    notifyListeners();
+  }
+
   Future<void> _saveFollowingLocal() async {
     final me = _userLogin;
     if (me == null || me.isEmpty) return;
@@ -181,8 +187,6 @@ class UserProvider with ChangeNotifier {
 
   // =================== ATUALIZAR / EXCLUIR CONTA ===================
 
-  /// Atualiza perfil do usuário autenticado.
-  /// Use os campos que quiser; os que forem null serão ignorados.
   Future<bool> updateProfile({
     String? name,
     String? password,
@@ -202,7 +206,6 @@ class UserProvider with ChangeNotifier {
         final updated = User.fromJson(map);
         setUser(updated);
 
-        // se o login mudou, persistimos a sessão com o novo login
         if (newLogin != null && newLogin.isNotEmpty) {
           _userLogin = newLogin;
           await _api.persistSession(
@@ -220,7 +223,6 @@ class UserProvider with ChangeNotifier {
     }
   }
 
-  /// Exclui a conta do usuário autenticado.
   Future<bool> deleteAccount() async {
     try {
       final r = await _api.deleteUser();

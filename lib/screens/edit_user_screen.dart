@@ -4,7 +4,7 @@ import 'package:provider/provider.dart';
 import '../provider/user_provider.dart';
 
 class EditUserScreen extends StatefulWidget {
-  const EditUserScreen({Key? key}) : super(key: key);
+  const EditUserScreen({super.key});
 
   @override
   State<EditUserScreen> createState() => _EditUserScreenState();

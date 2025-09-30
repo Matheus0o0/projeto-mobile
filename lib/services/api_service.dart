@@ -6,110 +6,94 @@ import 'package:shared_preferences/shared_preferences.dart';
 class ApiService {
   static const String baseUrl = 'https://api.papacapim.just.pro.br';
 
-  // Storage keys
-  static const _kToken = 'token';
-  static const _kSessionId = 'session_id';
-  static const _kUserLogin = 'user_login';
-
-  Map<String, String> _jsonHeaders({String? token}) {
-    final h = <String, String>{'Content-Type': 'application/json'};
-    if (token != null && token.isNotEmpty) {
-      h['x-session-token'] = token; // header que a API espera
-    }
-    return h;
+  void _logResponse(String method, Uri uri, http.Response r) {
+    final body = r.body;
+    final preview = body.length > 500 ? '${body.substring(0, 500)}…' : body;
+    // Não logar tokens do header; mostramos apenas método, path, status e preview do corpo
+    // ignore: avoid_print
+    print('[API] $method ${uri.path}${uri.hasQuery ? '?${uri.query}' : ''} -> ${r.statusCode}\n$preview');
   }
 
-  // ----------------- Persistência -----------------
-  Future<void> persistSession({
-    String? token,
-    int? sessionId,
-    String? userLogin,
-  }) async {
-    final prefs = await SharedPreferences.getInstance();
-    if (token != null) {
-      await prefs.setString(_kToken, token);
-    } else {
-      await prefs.remove(_kToken);
-    }
-
-    if (sessionId != null) {
-      await prefs.setInt(_kSessionId, sessionId);
-    } else {
-      await prefs.remove(_kSessionId);
-    }
-
-    if (userLogin != null) {
-      await prefs.setString(_kUserLogin, userLogin);
-    } else {
-      await prefs.remove(_kUserLogin);
-    }
-  }
-
-  Future<void> clearSession() async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.remove(_kToken);
-    await prefs.remove(_kSessionId);
-    await prefs.remove(_kUserLogin);
+  // ========= Sessão (token, sessionId, login) =========
+  Future<void> persistSession({String? token, int? sessionId, String? userLogin}) async {
+    final p = await SharedPreferences.getInstance();
+    if (token != null) await p.setString('x_session_token', token);
+    if (sessionId != null) await p.setInt('x_session_id', sessionId);
+    if (userLogin != null) await p.setString('x_user_login', userLogin);
   }
 
   Future<String?> getToken() async {
-    final prefs = await SharedPreferences.getInstance();
-    return prefs.getString(_kToken);
+    final p = await SharedPreferences.getInstance();
+    return p.getString('x_session_token');
   }
 
   Future<int?> getSessionId() async {
-    final prefs = await SharedPreferences.getInstance();
-    return prefs.getInt(_kSessionId);
+    final p = await SharedPreferences.getInstance();
+    return p.getInt('x_session_id');
   }
 
   Future<String?> getStoredUserLogin() async {
-    final prefs = await SharedPreferences.getInstance();
-    return prefs.getString(_kUserLogin);
+    final p = await SharedPreferences.getInstance();
+    return p.getString('x_user_login');
   }
 
-  // ----------------- AUTENTICAÇÃO -----------------
-  Future<http.Response> login(String login, String password) {
-    final url = Uri.parse('$baseUrl/sessions');
-    final body = jsonEncode({'login': login, 'password': password});
-    return http.post(url, headers: _jsonHeaders(), body: body);
+  Future<void> clearSession() async {
+    final p = await SharedPreferences.getInstance();
+    await p.remove('x_session_token');
+    await p.remove('x_session_id');
+    await p.remove('x_user_login');
   }
 
-  Future<http.Response> logout() async {
-    final sessionId = await getSessionId();
-    final token = await getToken();
-    if (sessionId == null) {
-      await clearSession();
-      return http.Response('', 204);
-    }
-    final url = Uri.parse('$baseUrl/sessions/$sessionId');
-    final res = await http.delete(url, headers: _jsonHeaders(token: token));
-    await clearSession();
-    return res;
+  Map<String, String> _jsonHeaders({String? token}) => {
+        'Content-Type': 'application/json',
+        if (token != null && token.isNotEmpty) 'x-session-token': token,
+      };
+
+  // ========= Auth =========
+  Future<http.Response> login(String login, String password) async {
+    final uri = Uri.parse('$baseUrl/sessions');
+    final r = await http.post(
+      uri,
+      headers: _jsonHeaders(),
+      body: jsonEncode({'login': login, 'password': password}),
+    );
+    _logResponse('POST', uri, r);
+    return r;
   }
 
-  // ----------------- USUÁRIOS -----------------
+  Future<http.Response> logout(int sessionId) async {
+    final t = await getToken();
+    final uri = Uri.parse('$baseUrl/sessions/$sessionId');
+    final r = await http.delete(
+      uri,
+      headers: _jsonHeaders(token: t),
+    );
+    _logResponse('DELETE', uri, r);
+    return r;
+  }
+
+  // ========= Users =========
   Future<http.Response> createUser({
     required String login,
     required String name,
     required String password,
     required String passwordConfirmation,
-  }) {
-    final url = Uri.parse('$baseUrl/users');
-    final body = jsonEncode({
-      'user': {
-        'login': login,
-        'name': name,
-        'password': password,
-        'password_confirmation': passwordConfirmation,
-      }
-    });
-    return http.post(url, headers: _jsonHeaders(), body: body);
-  }
-
-  Future<http.Response> getUserByLogin(String userLogin, {String? token}) async {
-    final t = token ?? await getToken();
-    final url = Uri.parse('$baseUrl/users/$userLogin');
-    return http.get(url, headers: _jsonHeaders(token: t));
+  }) async {
+    final uri = Uri.parse('$baseUrl/users');
+    final r = await http.post(
+      uri,
+      headers: _jsonHeaders(),
+      body: jsonEncode({
+        'user': {
+          'login': login,
+          'name': name,
+          'password': password,
+          'password_confirmation': passwordConfirmation,
+        }
+      }),
+    );
+    _logResponse('POST', uri, r);
+    return r;
   }
 
   Future<http.Response> updateUser({
@@ -119,119 +103,185 @@ class ApiService {
     String? passwordConfirmation,
   }) async {
     final t = await getToken();
-    final me = await getStoredUserLogin();
-    final url = Uri.parse('$baseUrl/users/$me');
-    final body = jsonEncode({
-      'user': {
-        if (login != null) 'login': login,
-        if (name != null) 'name': name,
-        if (password != null) 'password': password,
-        if (passwordConfirmation != null)
-          'password_confirmation': passwordConfirmation,
-      }
-    });
-    return http.patch(url, headers: _jsonHeaders(token: t), body: body);
+    // a API usa /users/1 (o “1” é ignorado e pega o user autenticado)
+    final uri = Uri.parse('$baseUrl/users/1');
+    final r = await http.patch(
+      uri,
+      headers: _jsonHeaders(token: t),
+      body: jsonEncode({
+        'user': {
+          if (login != null) 'login': login,
+          if (name != null) 'name': name,
+          if (password != null) 'password': password,
+          if (passwordConfirmation != null) 'password_confirmation': passwordConfirmation,
+        }
+      }),
+    );
+    _logResponse('PATCH', uri, r);
+    return r;
   }
 
   Future<http.Response> deleteUser() async {
     final t = await getToken();
-    final me = await getStoredUserLogin();
-    final url = Uri.parse('$baseUrl/users/$me');
-    return http.delete(url, headers: _jsonHeaders(token: t));
+    final uri = Uri.parse('$baseUrl/users/1');
+    final r = await http.delete(
+      uri,
+      headers: _jsonHeaders(token: t),
+    );
+    _logResponse('DELETE', uri, r);
+    return r;
   }
 
-  Future<http.Response> searchUsers(String term) async {
+  Future<http.Response> listUsers({int page = 1, String? search}) async {
     final t = await getToken();
-    final url = Uri.parse('$baseUrl/users?search=$term');
-    return http.get(url, headers: _jsonHeaders(token: t));
+    final q = <String, String>{'page': '$page'};
+    if (search != null && search.isNotEmpty) q['search'] = search;
+    final uri = Uri.parse('$baseUrl/users').replace(queryParameters: q);
+    final r = await http.get(uri, headers: _jsonHeaders(token: t));
+    _logResponse('GET', uri, r);
+    return r;
   }
 
-  // ----------------- POSTS -----------------
-  Future<http.Response> getFeed({int? page, int? feed, String? search}) async {
+  Future<http.Response> getUserByLogin(String login, {String? token}) async {
+    final t = token ?? await getToken();
+    final uri = Uri.parse('$baseUrl/users/$login');
+    final r = await http.get(
+      uri,
+      headers: _jsonHeaders(token: t),
+    );
+    _logResponse('GET', uri, r);
+    return r;
+  }
+
+  // ========= Followers =========
+  Future<http.Response> follow(String userLogin) async {
     final t = await getToken();
-    final qp = <String, String>{};
-    if (page != null) qp['page'] = '$page';
-    if (feed != null) qp['feed'] = '$feed'; // 1 = apenas quem eu sigo
+    final uri = Uri.parse('$baseUrl/users/$userLogin/followers');
+    final r = await http.post(
+      uri,
+      headers: _jsonHeaders(token: t),
+    );
+    _logResponse('POST', uri, r);
+    return r;
+  }
+
+  Future<http.Response> listFollowers(String userLogin) async {
+    final t = await getToken();
+    final uri = Uri.parse('$baseUrl/users/$userLogin/followers');
+    final r = await http.get(
+      uri,
+      headers: _jsonHeaders(token: t),
+    );
+    _logResponse('GET', uri, r);
+    return r;
+  }
+
+  Future<http.Response> unfollow(String userLogin, int followerId) async {
+    final t = await getToken();
+    final uri = Uri.parse('$baseUrl/users/$userLogin/followers/$followerId');
+    final r = await http.delete(
+      uri,
+      headers: _jsonHeaders(token: t),
+    );
+    _logResponse('DELETE', uri, r);
+    return r;
+  }
+
+  // ========= Posts =========
+  Future<http.Response> getPosts({int page = 1, int? feed, String? search}) async {
+    final t = await getToken();
+    final qp = <String, String>{'page': '$page'};
+    if (feed != null) qp['feed'] = '$feed';
     if (search != null && search.isNotEmpty) qp['search'] = search;
-    final url = Uri.parse('$baseUrl/posts')
-        .replace(queryParameters: qp.isEmpty ? null : qp);
-    return http.get(url, headers: _jsonHeaders(token: t));
+    final uri = Uri.parse('$baseUrl/posts').replace(queryParameters: qp);
+    final r = await http.get(uri, headers: _jsonHeaders(token: t));
+    _logResponse('GET', uri, r);
+    return r;
   }
 
-  Future<http.Response> getUserPosts(String login, {int? page}) async {
+  Future<http.Response> getUserPosts(String login, {int page = 1}) async {
     final t = await getToken();
-    final qp = <String, String>{};
-    if (page != null) qp['page'] = '$page';
-    final url = Uri.parse('$baseUrl/users/$login/posts')
-        .replace(queryParameters: qp.isEmpty ? null : qp);
-    return http.get(url, headers: _jsonHeaders(token: t));
+    final uri = Uri.parse('$baseUrl/users/$login/posts?page=$page');
+    final r = await http.get(uri, headers: _jsonHeaders(token: t));
+    _logResponse('GET', uri, r);
+    return r;
   }
 
   Future<http.Response> createPost(String message) async {
     final t = await getToken();
-    final url = Uri.parse('$baseUrl/posts');
-    final body = jsonEncode({'post': {'message': message}});
-    return http.post(url, headers: _jsonHeaders(token: t), body: body);
+    final uri = Uri.parse('$baseUrl/posts');
+    final r = await http.post(
+      uri,
+      headers: _jsonHeaders(token: t),
+      body: jsonEncode({'post': {'message': message}}),
+    );
+    _logResponse('POST', uri, r);
+    return r;
   }
 
   Future<http.Response> deletePost(int id) async {
     final t = await getToken();
-    final url = Uri.parse('$baseUrl/posts/$id');
-    return http.delete(url, headers: _jsonHeaders(token: t));
+    final uri = Uri.parse('$baseUrl/posts/$id');
+    final r = await http.delete(
+      uri,
+      headers: _jsonHeaders(token: t),
+    );
+    _logResponse('DELETE', uri, r);
+    return r;
   }
 
-  Future<http.Response> replyToPost(int parentPostId, String message) async {
+  // ========= Replies =========
+  Future<http.Response> getReplies(int parentId, {int page = 1}) async {
     final t = await getToken();
-    final url = Uri.parse('$baseUrl/posts/$parentPostId/replies');
-    final body = jsonEncode({'reply': {'message': message}});
-    return http.post(url, headers: _jsonHeaders(token: t), body: body);
+    final uri = Uri.parse('$baseUrl/posts/$parentId/replies?page=$page');
+    final r = await http.get(uri, headers: _jsonHeaders(token: t));
+    _logResponse('GET', uri, r);
+    return r;
   }
 
-  Future<http.Response> getReplies(int parentPostId) async {
+  Future<http.Response> replyToPost(int parentId, String message) async {
     final t = await getToken();
-    final url = Uri.parse('$baseUrl/posts/$parentPostId/replies');
-    return http.get(url, headers: _jsonHeaders(token: t));
+    final uri = Uri.parse('$baseUrl/posts/$parentId/replies');
+    final r = await http.post(
+      uri,
+      headers: _jsonHeaders(token: t),
+      body: jsonEncode({'reply': {'message': message}}),
+    );
+    _logResponse('POST', uri, r);
+    return r;
   }
 
-  // ----------------- LIKES -----------------
-  Future<http.Response> likePost(int id) async {
+  // ========= Likes =========
+  Future<http.Response> likePost(int postId) async {
     final t = await getToken();
-    final url = Uri.parse('$baseUrl/posts/$id/likes');
-    return http.post(url, headers: _jsonHeaders(token: t), body: jsonEncode({}));
+    final uri = Uri.parse('$baseUrl/posts/$postId/likes');
+    final r = await http.post(
+      uri,
+      headers: _jsonHeaders(token: t),
+    );
+    _logResponse('POST', uri, r);
+    return r;
   }
 
-  Future<http.Response> listLikes(int id) async {
+  Future<http.Response> listLikes(int postId) async {
     final t = await getToken();
-    final url = Uri.parse('$baseUrl/posts/$id/likes');
-    return http.get(url, headers: _jsonHeaders(token: t));
+    final uri = Uri.parse('$baseUrl/posts/$postId/likes');
+    final r = await http.get(
+      uri,
+      headers: _jsonHeaders(token: t),
+    );
+    _logResponse('GET', uri, r);
+    return r;
   }
 
   Future<http.Response> unlikePost(int postId, int likeId) async {
     final t = await getToken();
-    final url = Uri.parse('$baseUrl/posts/$postId/likes/$likeId');
-    return http.delete(url, headers: _jsonHeaders(token: t));
-  }
-
-  // ----------------- FOLLOWERS -----------------
-  /// Lista seguidores de um usuário (quem segue ESSE usuário).
-  Future<http.Response> listFollowers(String login) async {
-    final t = await getToken();
-    final url = Uri.parse('$baseUrl/users/$login/followers');
-    return http.get(url, headers: _jsonHeaders(token: t));
-  }
-
-  /// Segue o usuário.
-  Future<http.Response> follow(String loginToFollow) async {
-    final t = await getToken();
-    final url = Uri.parse('$baseUrl/users/$loginToFollow/followers');
-    return http.post(url, headers: _jsonHeaders(token: t), body: jsonEncode({}));
-  }
-
-  /// Deixa de seguir (precisa do id do follower).
-  Future<http.Response> unfollow(String loginToUnfollow, int followerId) async {
-    final t = await getToken();
-    final url =
-        Uri.parse('$baseUrl/users/$loginToUnfollow/followers/$followerId');
-    return http.delete(url, headers: _jsonHeaders(token: t));
+    final uri = Uri.parse('$baseUrl/posts/$postId/likes/$likeId');
+    final r = await http.delete(
+      uri,
+      headers: _jsonHeaders(token: t),
+    );
+    _logResponse('DELETE', uri, r);
+    return r;
   }
 }
